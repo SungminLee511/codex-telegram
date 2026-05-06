@@ -176,20 +176,24 @@ class CodexCLIManager:
     ) -> List[str]:
         """Build the codex exec argv."""
         cmd: List[str] = [self._resolve_codex_binary(), "exec"]
+        is_resume = bool(continue_session and session_id)
 
-        if continue_session and session_id:
+        if is_resume:
             cmd.append("resume")
-            cmd.append(session_id)
 
         cmd.append("--json")
-        cmd.extend(["--cd", str(working_directory)])
 
-        sandbox_mode = getattr(self.config, "codex_sandbox_mode", None) or (
-            "workspace-write"
-            if getattr(self.config, "sandbox_enabled", True)
-            else "danger-full-access"
-        )
-        cmd.extend(["-s", sandbox_mode])
+        # `codex exec resume` does NOT accept --cd, -s, or --add-dir;
+        # the resumed session keeps its original cwd and sandbox settings.
+        if not is_resume:
+            cmd.extend(["--cd", str(working_directory)])
+
+            sandbox_mode = getattr(self.config, "codex_sandbox_mode", None) or (
+                "workspace-write"
+                if getattr(self.config, "sandbox_enabled", True)
+                else "danger-full-access"
+            )
+            cmd.extend(["-s", sandbox_mode])
 
         if getattr(self.config, "codex_skip_git_repo_check", True):
             cmd.append("--skip-git-repo-check")
@@ -202,8 +206,9 @@ class CodexCLIManager:
         if effort:
             cmd.extend(["-c", f"model_reasoning_effort={effort}"])
 
-        for extra in getattr(self.config, "codex_add_dirs", None) or []:
-            cmd.extend(["--add-dir", str(extra)])
+        if not is_resume:
+            for extra in getattr(self.config, "codex_add_dirs", None) or []:
+                cmd.extend(["--add-dir", str(extra)])
 
         if getattr(self.config, "codex_dangerously_bypass", False):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
@@ -213,6 +218,10 @@ class CodexCLIManager:
 
         for override in getattr(self.config, "codex_config_overrides", None) or []:
             cmd.extend(["-c", str(override)])
+
+        # Positional SESSION_ID must come AFTER options for `exec resume`.
+        if is_resume:
+            cmd.append(session_id)
 
         if prompt_via_stdin:
             cmd.append("-")

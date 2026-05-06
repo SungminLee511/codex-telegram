@@ -37,7 +37,11 @@ else
 fi
 
 echo "[restart_bot] Starting new bot process..."
-nohup python -m src.main > "$LOG_FILE" 2>&1 &
+# Clear env vars that would shadow .env (claude bot exports its own tokens)
+PYBIN="$(which python)"
+unset TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME ANTHROPIC_API_KEY OPENAI_API_KEY
+nohup env -i HOME="$HOME" PATH="$HOME/.local/bin:$(dirname "$PYBIN"):/usr/bin:/bin" \
+    "$PYBIN" -m src.main > "$LOG_FILE" 2>&1 &
 NEW_PID=$!
 disown $NEW_PID 2>/dev/null || true
 
