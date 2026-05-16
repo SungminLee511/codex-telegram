@@ -228,15 +228,17 @@ class CodexCLIManager:
 
         return cmd
 
-    def _build_system_addendum(self, working_directory: Path) -> Optional[str]:
-        """Read AGENTS.md or CLAUDE.md from cwd, return as string for prompt."""
-        for name in ("AGENTS.md", "CLAUDE.md"):
-            p = Path(working_directory) / name
-            if p.exists():
-                try:
-                    return p.read_text(encoding="utf-8")
-                except OSError:
-                    continue
+    def _build_legacy_claude_addendum(self, working_directory: Path) -> Optional[str]:
+        """Read CLAUDE.md only when Codex has no native AGENTS.md context."""
+        if (Path(working_directory) / "AGENTS.md").exists():
+            return None
+
+        p = Path(working_directory) / "CLAUDE.md"
+        if p.exists():
+            try:
+                return p.read_text(encoding="utf-8")
+            except OSError:
+                return None
         return None
 
     # ---------------------------------------------------------------- execute
@@ -262,16 +264,23 @@ class CodexCLIManager:
             continue_session=continue_session,
         )
 
-        sys_addendum = self._build_system_addendum(working_directory)
-        boundary_note = (
-            f"All file operations must stay within {working_directory}. "
-            "Use relative paths."
-        )
-        full_prompt_parts: List[str] = [boundary_note]
-        if sys_addendum:
-            full_prompt_parts.append(sys_addendum)
-        full_prompt_parts.append(prompt)
-        full_prompt = "\n\n".join(full_prompt_parts)
+        # Keep repeated turns like Claude SDK sessions: only the user's new
+        # prompt is sent on resume. Codex loads AGENTS.md natively, so we only
+        # inject CLAUDE.md once as a legacy fallback when no AGENTS.md exists.
+        is_resume = bool(continue_session and session_id)
+        if is_resume:
+            full_prompt = prompt
+        else:
+            sys_addendum = self._build_legacy_claude_addendum(working_directory)
+            boundary_note = (
+                f"All file operations must stay within {working_directory}. "
+                "Use relative paths."
+            )
+            full_prompt_parts: List[str] = [boundary_note]
+            if sys_addendum:
+                full_prompt_parts.append(sys_addendum)
+            full_prompt_parts.append(prompt)
+            full_prompt = "\n\n".join(full_prompt_parts)
 
         # Materialize images to temp files (codex CLI takes file paths).
         tmp_image_paths: List[str] = []

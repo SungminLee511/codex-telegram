@@ -57,10 +57,10 @@ cp .env.example .env
 
 ```bash
 # Foreground
-python -m src.main
+python -m src.main_codex
 
 # Background (nohup)
-nohup python -m src.main > bot.log 2>&1 &
+nohup python -m src.main_codex > bot.log 2>&1 &
 
 # Restart
 bash restart_bot.sh
