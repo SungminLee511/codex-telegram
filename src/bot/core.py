@@ -230,9 +230,19 @@ class CodexBot:
                     drop_pending_updates=True,
                 )
 
+                from .inject_watcher import inject_watcher_loop
+
+                inject_task = asyncio.create_task(inject_watcher_loop(self.app))
+
                 # Keep running until manually stopped
                 while self.is_running:
                     await asyncio.sleep(1)
+
+                inject_task.cancel()
+                try:
+                    await inject_task
+                except asyncio.CancelledError:
+                    pass
         except Exception as e:
             logger.error("Error running bot", error=str(e))
             raise CodexTelegramError(f"Failed to start bot: {str(e)}") from e

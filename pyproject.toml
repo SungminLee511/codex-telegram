@@ -27,7 +27,7 @@ Homepage = "https://github.com/SungminLee511/codex-telegram"
 Repository = "https://github.com/SungminLee511/codex-telegram"
 
 [project.scripts]
-codex-telegram-bot = "src.main:run"
+codex-telegram-bot = "src.main_codex:run"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]

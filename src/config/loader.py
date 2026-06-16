@@ -34,7 +34,11 @@ def load_config(
     env_file = config_file or Path(".env")
     if env_file.exists():
         logger.info("Loading .env file", path=str(env_file))
-        load_dotenv(env_file)
+        # override=True so this bot's own .env always wins over any
+        # inherited/stray env var (e.g. a TELEGRAM_BOT_TOKEN exported in the
+        # launching shell from the other bot's .env), preventing the two bots
+        # from polling the same token.
+        load_dotenv(env_file, override=True)
     else:
         logger.warning("No .env file found", path=str(env_file))
 
