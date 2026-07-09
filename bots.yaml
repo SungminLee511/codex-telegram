@@ -1,0 +1,22 @@
+# Multi-bot registry for supervise.sh (Codex Telegram bots).
+#
+# Each entry describes one bot instance. The supervisor uses start_bot.sh /
+# restart_bot.sh per bot, which already isolate process-match, DB, inject
+# spool, and logs by bot_id.
+#
+# Fields:
+#   bot_id   : short slug; selects spool dir, DB default, log, process match.
+#   env_file : .env file passed via --config-file (ignored for bot_id 'main',
+#              which runs bare for backward compatibility). Must set BOT_ID,
+#              TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, ALLOWED_USERS.
+#   enabled  : whether the supervisor manages this bot.
+
+bots:
+  - bot_id: main
+    env_file: .env
+    enabled: true
+
+  # Example second bot — copy bot2.env, set a distinct token/username, enable.
+  - bot_id: bot2
+    env_file: bot2.env
+    enabled: false

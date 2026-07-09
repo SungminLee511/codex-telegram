@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Bot settings
+    bot_id: str = Field(
+        "main",
+        description=(
+            "Short slug identifying this bot instance. Drives per-bot namespacing "
+            "of the SQLite DB, inject spool dir, relay-state file and process match. "
+            "Default 'main' reproduces legacy single-bot behaviour byte-for-byte."
+        ),
+    )
+    inject_dir: str = Field(
+        "/tmp/codex_inject",
+        description="Base directory under which each bot gets its own inject spool dir",
+    )
     telegram_bot_token: SecretStr = Field(
         ..., description="Telegram bot token from BotFather"
     )
@@ -549,12 +561,28 @@ class Settings(BaseSettings):
                     "projects_config_path required when enable_project_threads is True"
                 )
 
+        # Per-bot DB derivation: a named bot that hasn't set an explicit
+        # DATABASE_URL gets its own file so instances never share state.
+        # 'main' keeps the default 'sqlite:///data/bot.db' (no migration).
+        if self.bot_id != "main" and self.database_url == DEFAULT_DATABASE_URL:
+            self.database_url = f"sqlite:///data/bot_{self.bot_id}.db"
+
         return self
 
     @property
     def is_production(self) -> bool:
         """Check if running in production mode."""
         return not (self.debug or self.development_mode)
+
+    @property
+    def inject_spool_dir(self) -> Path:
+        """Per-bot inject spool directory: <inject_dir>/<bot_id>/."""
+        return Path(self.inject_dir) / self.bot_id
+
+    @property
+    def relay_state_path(self) -> Path:
+        """Per-bot relay kill-switch state file."""
+        return Path("/tmp") / f"codex_relay_state_{self.bot_id}.json"
 
     @property
     def database_path(self) -> Optional[Path]:

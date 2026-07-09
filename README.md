@@ -69,6 +69,29 @@ bash restart_bot.sh
 tail -f bot.log
 ```
 
+## Multiple bots (multi-bot)
+
+You can run several isolated Codex bots (one per token) on one host. Everything
+is keyed by a `BOT_ID` slug (default `main`); each bot gets its own DB, inject
+spool, relay-state file, log, and scoped process match. `main` keeps legacy
+paths byte-for-byte. See `MULTI_BOT_PLAN.md` for the full design.
+
+```bash
+# Add a second bot
+cp bot2.env.example bot2.env        # set BOT_ID=bot2 + a distinct token/username
+./start_bot.sh bot2                 # start it (kills nothing)
+./restart_bot.sh bot2               # restart ONLY bot2
+./supervise.sh status               # status of all enabled bots in bots.yaml
+
+# Self-wake a specific bot (3rd arg = BOT_ID)
+./wake_after.sh 30 "RELAY: next step" bot2
+```
+
+Derived per-bot paths (`bot2` shown): DB `data/bot_bot2.db`, inject spool
+`/tmp/codex_inject/bot2/`, relay-state `/tmp/codex_relay_state_bot2.json`,
+log `bot_bot2.log`. Codex paths are separate from the Claude bot's `/tmp/claude_*`
+and match only `src.main_codex`, so the two families never interfere.
+
 ## .env reference
 
 See `.env.example`. Required fields:

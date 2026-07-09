@@ -103,6 +103,12 @@ celerybeat.pid
 
 # Environments
 .env
+# Per-bot env files hold real tokens — keep local. (*.env.example is committed.)
+bot*.env
+!bot*.env.example
+# Per-bot log files
+bot_*.log
+bot.log
 .venv
 env/
 venv/

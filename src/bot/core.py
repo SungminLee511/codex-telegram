@@ -230,9 +230,23 @@ class CodexBot:
                     drop_pending_updates=True,
                 )
 
-                from .inject_watcher import inject_watcher_loop
+                from .inject_watcher import (
+                    DEFAULT_INJECT_PATH,
+                    inject_watcher_loop,
+                )
 
-                inject_task = asyncio.create_task(inject_watcher_loop(self.app))
+                # Per-bot spool dir; only 'main' also watches the legacy file.
+                spool_dir = self.settings.inject_spool_dir
+                legacy_path = (
+                    DEFAULT_INJECT_PATH
+                    if self.settings.bot_id == "main"
+                    else None
+                )
+                inject_task = asyncio.create_task(
+                    inject_watcher_loop(
+                        self.app, spool_dir=spool_dir, legacy_path=legacy_path
+                    )
+                )
 
                 # Keep running until manually stopped
                 while self.is_running:
