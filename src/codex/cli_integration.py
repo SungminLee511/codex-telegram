@@ -33,6 +33,38 @@ from .exceptions import (
 
 logger = structlog.get_logger()
 
+
+def _remember_rate_limits(line: bytes) -> None:
+    """Seed the banner's usage cache from a live event, if it carries limits."""
+    try:
+        from ..bot.utils import usage_limits
+
+        usage_limits.remember(usage_limits.parse_event(line))
+    except Exception as exc:  # decoration only
+        logger.debug("rate limit parse failed", error=str(exc))
+
+
+def _rollout_stats(session_id: str):
+    """(context tokens, model) from the session's rollout, or (None, None)."""
+    if not session_id:
+        return None, None
+    try:
+        from ..bot.utils import transcript_stats
+        from .session_index import DEFAULT_SESSIONS_DIR, SessionIndex
+
+        path = SessionIndex(Path("/dev/null"), DEFAULT_SESSIONS_DIR).find_path(
+            session_id
+        )
+        if path is None:
+            return None, None
+        return (
+            transcript_stats.context_tokens(str(path)),
+            transcript_stats.last_model(str(path)),
+        )
+    except Exception as exc:  # decoration only
+        logger.debug("rollout stats failed", error=str(exc))
+        return None, None
+
 # Fallback message when Codex produces no agent_message but did execute tools.
 TASK_COMPLETED_MSG = "✅ Task completed. Tools used: {tools_summary}"
 
@@ -73,6 +105,12 @@ class CodexResponse:
     tools_used: List[Dict[str, Any]] = field(default_factory=list)
     interrupted: bool = False
     usage: Dict[str, int] = field(default_factory=dict)
+    # Context the model held on its last call, read from the rollout after
+    # the run (turn.completed sums every call in the turn, which overstates
+    # it whenever tools were used).
+    context_tokens: Optional[int] = None
+    # The model that actually answered, as the rollout's turn_context names it.
+    model_id: Optional[str] = None
 
 
 @dataclass
@@ -173,6 +211,8 @@ class CodexCLIManager:
         session_id: Optional[str],
         continue_session: bool,
         image_files: List[str],
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> List[str]:
         """Build the codex exec argv."""
         cmd: List[str] = [self._resolve_codex_binary(), "exec"]
@@ -198,11 +238,13 @@ class CodexCLIManager:
         if getattr(self.config, "codex_skip_git_repo_check", True):
             cmd.append("--skip-git-repo-check")
 
-        model = getattr(self.config, "codex_model", None)
+        # Per-session /model and /effort choices override the configured
+        # defaults. Both are accepted by `codex exec resume` too.
+        model = model or getattr(self.config, "codex_model", None)
         if model:
             cmd.extend(["-m", model])
 
-        effort = getattr(self.config, "codex_reasoning_effort", None)
+        effort = effort or getattr(self.config, "codex_reasoning_effort", None)
         if effort:
             cmd.extend(["-c", f"model_reasoning_effort={effort}"])
 
@@ -252,6 +294,8 @@ class CodexCLIManager:
         stream_callback: Optional[Callable[[StreamUpdate], Any]] = None,
         interrupt_event: Optional[asyncio.Event] = None,
         images: Optional[List[Dict[str, str]]] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> CodexResponse:
         """Run a single Codex turn via ``codex exec [resume]``."""
         loop = asyncio.get_event_loop()
@@ -308,6 +352,8 @@ class CodexCLIManager:
                 session_id=session_id,
                 continue_session=continue_session,
                 image_files=tmp_image_paths,
+                model=model,
+                effort=effort,
             )
 
             logger.debug("Codex CLI argv", cmd=cmd)
@@ -374,6 +420,12 @@ class CodexCLIManager:
                         continue
 
                     etype = event.get("type")
+
+                    if "rate_limits" in event or (
+                        isinstance(event.get("payload"), dict)
+                        and "rate_limits" in event["payload"]
+                    ):
+                        _remember_rate_limits(line)
 
                     if etype == "thread.started":
                         tid = event.get("thread_id")
@@ -512,11 +564,15 @@ class CodexCLIManager:
                 )
 
             duration_ms = int((loop.time() - start_time) * 1000)
-            cost = _estimate_cost(getattr(self.config, "codex_model", None), usage)
+            cost = _estimate_cost(
+                model or getattr(self.config, "codex_model", None), usage
+            )
+            final_session_id = captured_session_id or session_id or ""
+            context_tokens, model_id = _rollout_stats(final_session_id)
 
             return CodexResponse(
                 content=content,
-                session_id=captured_session_id or session_id or "",
+                session_id=final_session_id,
                 cost=cost,
                 duration_ms=duration_ms,
                 num_turns=max(1, num_turns),
@@ -525,6 +581,8 @@ class CodexCLIManager:
                 tools_used=tools_used,
                 interrupted=interrupted,
                 usage=usage,
+                context_tokens=context_tokens,
+                model_id=model_id or model or getattr(self.config, "codex_model", None),
             )
 
         except (CodexTimeoutError, CodexProcessError, CodexParsingError):

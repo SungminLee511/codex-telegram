@@ -41,8 +41,14 @@ class CodexIntegration:
         force_new: bool = False,
         interrupt_event: Optional["asyncio.Event"] = None,
         images: Optional[List[Dict[str, str]]] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> CodexResponse:
-        """Run Codex command with full integration."""
+        """Run Codex command with full integration.
+
+        ``model`` / ``effort`` are the session's /model and /effort choices;
+        None keeps the configured defaults.
+        """
         logger.info(
             "Running Codex command",
             user_id=user_id,
@@ -91,6 +97,8 @@ class CodexIntegration:
                     stream_callback=on_stream,
                     interrupt_event=interrupt_event,
                     images=images,
+                    model=model,
+                    effort=effort,
                 )
             except (asyncio.TimeoutError, CodexTimeoutError):
                 # Wall-clock timeout — the session is still healthy on Codex's
@@ -126,6 +134,8 @@ class CodexIntegration:
                         stream_callback=on_stream,
                         interrupt_event=interrupt_event,
                         images=images,
+                        model=model,
+                        effort=effort,
                     )
                 else:
                     raise
@@ -171,8 +181,10 @@ class CodexIntegration:
         stream_callback: Optional[Callable] = None,
         interrupt_event: Optional[asyncio.Event] = None,
         images: Optional[List[Dict[str, str]]] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> CodexResponse:
-        """Execute command via SDK."""
+        """Execute one turn through the Codex CLI."""
         return await self.sdk_manager.execute_command(
             prompt=prompt,
             working_directory=working_directory,
@@ -181,6 +193,8 @@ class CodexIntegration:
             stream_callback=stream_callback,
             interrupt_event=interrupt_event,
             images=images,
+            model=model,
+            effort=effort,
         )
 
     async def _find_resumable_session(
