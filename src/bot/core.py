@@ -196,6 +196,19 @@ class CodexBot:
 
         return middleware_wrapper
 
+    async def _clear_stale_progress(self) -> None:
+        """Retire progress messages orphaned by the previous process."""
+        orchestrator = getattr(self, "orchestrator", None)
+        registry = getattr(orchestrator, "progress_registry", None)
+        if registry is None:
+            return
+        try:
+            from .utils.progress_registry import sweep_stale
+
+            await sweep_stale(self.app.bot, registry)
+        except Exception as exc:  # never block startup on cosmetics
+            logger.warning("Stale progress sweep failed", error=str(exc))
+
     async def start(self) -> None:
         """Start the bot."""
         if self.is_running:
@@ -229,6 +242,10 @@ class CodexBot:
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
                 )
+
+                # Any "Working..." message still on record belongs to a
+                # request the *previous* process was serving when it died.
+                await self._clear_stale_progress()
 
                 from .inject_watcher import (
                     DEFAULT_INJECT_PATH,

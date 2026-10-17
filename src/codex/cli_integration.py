@@ -111,6 +111,9 @@ class CodexResponse:
     context_tokens: Optional[int] = None
     # The model that actually answered, as the rollout's turn_context names it.
     model_id: Optional[str] = None
+    # True when Codex wrote no text and `content` is the bot's stand-in
+    # ("Task completed. Tools used: ..."): the turn had no real reply.
+    no_text: bool = False
 
 
 @dataclass
@@ -551,6 +554,7 @@ class CodexCLIManager:
                 raise CodexProcessError(err_msg)
 
             content = "\n\n".join(c for c in text_chunks if c).strip()
+            no_text = not content
             if not content and tools_used:
                 names = list(
                     dict.fromkeys(
@@ -583,6 +587,7 @@ class CodexCLIManager:
                 usage=usage,
                 context_tokens=context_tokens,
                 model_id=model_id or model or getattr(self.config, "codex_model", None),
+                no_text=no_text,
             )
 
         except (CodexTimeoutError, CodexProcessError, CodexParsingError):
