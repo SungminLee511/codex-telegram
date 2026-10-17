@@ -4,6 +4,7 @@ Provides simple interface for bot handlers.
 """
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -15,6 +16,22 @@ from .cli_integration import CodexResponse, CodexCLIManager, StreamUpdate
 from .session import SessionManager
 
 logger = structlog.get_logger()
+
+# When the codex process is killed by a signal, asyncio reports a negative
+# return code (-15 SIGTERM, -9 SIGKILL); through a shell it is 128+signal
+# (143/137). Either is a *transient* kill (host restart, OOM, deploy): the
+# rollout on disk is intact, so re-resuming the same thread id recovers full
+# context. A user /stop is an interrupt handled in-process and never gets here.
+_SUBPROCESS_KILL_RE = re.compile(r"(?:exit(?:ed)?(?: with)? code) (?:143|137|-15|-9)\b")
+
+_RESUME_AFTER_KILL_MAX_ATTEMPTS = 3
+_RESUME_AFTER_KILL_BASE_DELAY = 1.0
+_RESUME_AFTER_KILL_MAX_DELAY = 5.0
+
+
+def _is_transient_subprocess_kill(error: BaseException) -> bool:
+    """True when the codex process died from a signal, not a session error."""
+    return bool(_SUBPROCESS_KILL_RE.search(str(error)))
 
 
 class CodexIntegration:
@@ -110,19 +127,65 @@ class CodexIntegration:
                 )
                 raise
             except Exception as resume_error:
-                # If resume failed (e.g., session expired/missing on Codex's side),
-                # retry as a fresh session.  The CLI returns a generic exit-code-1
-                # when the session is gone, so we catch *any* error during resume.
-                if should_continue:
+                # New sessions have no id to resume — nothing to recover.
+                if not should_continue:
+                    raise
+
+                response = None
+
+                # A transient kill of the codex process (SIGTERM/SIGKILL) leaves
+                # the rollout intact on disk. Re-resume the SAME id with bounded
+                # backoff *before* discarding any context; only a genuine
+                # "session gone" failure falls through to a fresh session.
+                if _is_transient_subprocess_kill(resume_error):
+                    last_kill_error: Exception = resume_error
+                    for attempt in range(1, _RESUME_AFTER_KILL_MAX_ATTEMPTS + 1):
+                        delay = min(
+                            _RESUME_AFTER_KILL_BASE_DELAY * (2 ** (attempt - 1)),
+                            _RESUME_AFTER_KILL_MAX_DELAY,
+                        )
+                        logger.warning(
+                            "Codex process killed; re-resuming same session",
+                            session_id=session.session_id,
+                            attempt=attempt,
+                            delay_seconds=delay,
+                            error=str(last_kill_error),
+                        )
+                        await asyncio.sleep(delay)
+                        try:
+                            response = await self._execute(
+                                prompt=prompt,
+                                working_directory=working_directory,
+                                session_id=codex_session_id,
+                                continue_session=True,
+                                stream_callback=on_stream,
+                                interrupt_event=interrupt_event,
+                                images=images,
+                                model=model,
+                                effort=effort,
+                            )
+                            logger.info(
+                                "Recovered session after process kill",
+                                session_id=session.session_id,
+                                attempt=attempt,
+                            )
+                            break
+                        except (asyncio.TimeoutError, CodexTimeoutError):
+                            raise
+                        except Exception as retry_error:
+                            last_kill_error = retry_error
+                            if not _is_transient_subprocess_kill(retry_error):
+                                break
+
+                # The CLI returns a generic non-zero exit when the session is
+                # gone, so any other resume failure starts a fresh session.
+                if response is None:
                     logger.warning(
                         "Session resume failed, starting fresh session",
                         failed_session_id=codex_session_id,
                         error=str(resume_error),
                     )
-                    # Clean up the stale session
                     await self.session_manager.remove_session(session.session_id)
-
-                    # Create a fresh session and retry
                     session = await self.session_manager.get_or_create_session(
                         user_id, working_directory
                     )
@@ -137,8 +200,6 @@ class CodexIntegration:
                         model=model,
                         effort=effort,
                     )
-                else:
-                    raise
 
             # Update session (assigns real session_id for new sessions)
             await self.session_manager.update_session(session, response)
