@@ -152,4 +152,5 @@ data/
 sessions/
 backups/
 uploads/
-config/mcp.json
+config/mcp.json.relay/
+outbox/
