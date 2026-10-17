@@ -12,10 +12,11 @@ import json
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.utils.constants import (
+    CODEX_EFFORT_LEVELS,
     DEFAULT_CODEX_MAX_COST_PER_REQUEST,
     DEFAULT_CODEX_MAX_COST_PER_USER,
     DEFAULT_CODEX_MAX_TURNS,
@@ -89,13 +90,16 @@ class Settings(BaseSettings):
     codex_model: Optional[str] = Field(
         None, description="Codex model to use (defaults to CLI default if unset)"
     )
-    codex_reasoning_effort: Optional[Literal["minimal", "low", "medium", "high"]] = (
-        Field(
-            None,
-            description=(
-                "Reasoning effort for gpt-5 family models (minimal/low/medium/high)"
-            ),
-        )
+    codex_reasoning_effort: Optional[str] = Field(
+        None,
+        # CODEX_REASONING_EFFORT is the historic name; BOT_DEFAULT_EFFORT matches
+        # the Claude bot so one .env convention covers both families.
+        validation_alias=AliasChoices("CODEX_REASONING_EFFORT", "BOT_DEFAULT_EFFORT"),
+        description=(
+            "Default reasoning effort (minimal/low/medium/high/xhigh), passed as "
+            "-c model_reasoning_effort=<x>. Unset lets the model decide; /effort "
+            "overrides it for one session."
+        ),
     )
     codex_sandbox_mode: Optional[
         Literal["read-only", "workspace-write", "danger-full-access"]
@@ -297,6 +301,14 @@ class Settings(BaseSettings):
         description="Conversational agentic mode (default) vs classic command mode",
     )
 
+    session_header: bool = Field(
+        True,
+        description=(
+            "Prepend a session banner (name, id, cwd, bot) to Codex's replies. "
+            "Display-only: added after the model answers, never sent to Codex."
+        ),
+    )
+
     # Reply quoting
     reply_quote: bool = Field(
         True,
@@ -380,7 +392,11 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        populate_by_name=True,
     )
 
     @field_validator("allowed_users", "notification_chat_ids", mode="before")
@@ -408,6 +424,21 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return [str(tool) for tool in v]
         return v  # type: ignore[no-any-return]
+
+    @field_validator("codex_reasoning_effort", mode="before")
+    @classmethod
+    def validate_reasoning_effort(cls, v: Any) -> Optional[str]:
+        """Normalise effort; empty means 'let the model decide'."""
+        if v is None:
+            return None
+        value = str(v).strip().lower()
+        if not value:
+            return None
+        if value not in CODEX_EFFORT_LEVELS:
+            raise ValueError(
+                f"reasoning effort must be one of {', '.join(CODEX_EFFORT_LEVELS)}"
+            )
+        return value
 
     @field_validator("codex_add_dirs", "codex_config_overrides", mode="before")
     @classmethod

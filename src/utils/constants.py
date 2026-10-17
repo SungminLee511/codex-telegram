@@ -15,7 +15,7 @@ DEFAULT_RATE_LIMIT_WINDOW = 60
 DEFAULT_RATE_LIMIT_BURST = 20
 DEFAULT_PROJECT_THREADS_SYNC_ACTION_INTERVAL_SECONDS = 1.1
 
-DEFAULT_SESSION_TIMEOUT_HOURS = 2
+DEFAULT_SESSION_TIMEOUT_HOURS = 24 * 7
 DEFAULT_MAX_SESSIONS_PER_USER = 5
 
 # Message limits
@@ -82,6 +82,8 @@ DEFAULT_DATABASE_URL = "sqlite:///data/bot.db"
 DEFAULT_BACKUP_RETENTION_DAYS = 30
 
 # Codex defaults
+# Values accepted by `-c model_reasoning_effort=<x>`, lowest first.
+CODEX_EFFORT_LEVELS = ("minimal", "low", "medium", "high", "xhigh")
 DEFAULT_CODEX_BINARY = "codex"
 DEFAULT_CODEX_OUTPUT_FORMAT = "stream-json"
 
